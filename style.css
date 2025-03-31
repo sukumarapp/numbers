@@ -1,0 +1,95 @@
+body {
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background-color: #f0f0f0;
+    font-family: sans-serif;
+    /* Prevent text selection interfering with taps */
+    user-select: none;
+    -webkit-user-select: none; /* Safari */
+    -moz-user-select: none; /* Firefox */
+    -ms-user-select: none; /* IE/Edge */
+}
+
+#game-container {
+    position: relative;
+    border: 1px solid #ccc;
+    overflow: hidden; /* Keep particles inside */
+    background-color: white;
+    /* Adjust size as needed, make it responsive later if required */
+    width: 95vw; /* Use viewport width */
+    max-width: 800px; /* Max size on larger screens */
+    aspect-ratio: 800 / 600; /* Maintain aspect ratio */
+    display: flex;
+    flex-direction: column;
+}
+
+#top-bar {
+    padding: 10px;
+    background-color: #e0e0e0;
+    display: flex;
+    justify-content: center; /* Center buttons */
+    gap: 10px; /* Space between buttons */
+    flex-shrink: 0; /* Prevent bar from shrinking */
+}
+
+#top-bar button {
+    padding: 8px 15px;
+    font-size: 1em; /* Relative font size */
+    cursor: pointer;
+    border: 1px solid #aaa;
+    border-radius: 5px;
+    background-color: #f8f8f8;
+}
+
+#top-bar button:active {
+    background-color: #ddd;
+}
+
+#gameCanvas {
+    display: block; /* Removes extra space below canvas */
+    width: 100%; /* Make canvas fill container width */
+    height: auto; /* Adjust height automatically based on aspect ratio */
+    flex-grow: 1; /* Allow canvas to fill remaining space */
+}
+
+#feedback {
+    position: absolute;
+    bottom: 10px;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 1.5em; /* Relative font size */
+    font-weight: bold;
+    pointer-events: none; /* Prevent feedback text from blocking clicks */
+}
+
+/* Style for specific feedback messages */
+.feedback-correct {
+    color: green;
+}
+
+.feedback-wrong {
+    color: red;
+}
+
+/* Style for paused overlay */
+#paused-overlay {
+    position: absolute;
+    top: 50px; /* Below button bar */
+    left: 0;
+    width: 100%;
+    height: calc(100% - 50px); /* Fill remaining area */
+    background-color: rgba(128, 128, 128, 0.7); /* Semi-transparent gray */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 3em;
+    color: white;
+    font-weight: bold;
+    pointer-events: none; /* Don't block buttons below */
+    z-index: 10; /* Make sure it's on top */
+}

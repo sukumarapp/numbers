@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Number Clicker Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <div id="top-bar">
+            <button id="startButton">Start</button>
+            <button id="pauseButton">Pause</button>
+            <button id="exitButton">Exit</button> <!-- Exit might just reload or go back -->
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <div id="feedback"></div>
+    </div>
+
+    <!-- Preload sounds (optional but good practice) -->
+    <!-- Add <audio> tags for each sound file if you want browser preloading -->
+    <!-- Example: <audio id="audio1" src="sounds/1.wav" preload="auto"></audio> -->
+
+    <script src="script.js"></script>
+</body>
+</html>
