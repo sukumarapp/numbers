@@ -30,23 +30,19 @@ let feedbackTimeout = null;
 let audioCueTimeout = null;
 let lastInteractionTime = 0; // Track user interaction for audio autoplay
 
-// --- Sound Loading (Web Audio API is more robust, but <audio> is simpler) ---
+// --- Sound Loading ---
 const sounds = {};
 function loadSounds() {
     try {
-        console.log("Attempting to load MP3 sounds..."); // Added console log
+        console.log("Attempting to load MP3 sounds...");
         for (let i = MIN_NUMBER; i <= MAX_NUMBER; i++) {
             // Assumes sounds are in a 'sounds' subfolder and are now MP3s
-            // **** CHANGE HERE ****
             sounds[i] = new Audio(`sounds/${i}.mp3`);
-            // Add error handling for individual files if needed
             sounds[i].onerror = () => console.error(`Failed to load sound: sounds/${i}.mp3`);
         }
-         // **** CHANGE HERE ****
         sounds.good_job = new Audio('sounds/good_job.mp3');
         sounds.good_job.onerror = () => console.error(`Failed to load sound: sounds/good_job.mp3`);
 
-        // **** CHANGE HERE ****
         sounds.wrong_answer = new Audio('sounds/wrong_answer.mp3');
         sounds.wrong_answer.onerror = () => console.error(`Failed to load sound: sounds/wrong_answer.mp3`);
 
@@ -56,6 +52,37 @@ function loadSounds() {
         feedbackDiv.textContent = "Error loading sounds.";
     }
 }
+
+// **** playSound FUNCTION MOVED HERE - BEFORE IT'S CALLED ****
+function playSound(soundName) {
+    const sound = sounds[soundName]; // Get the audio object
+    console.log(`Attempting to play: ${soundName}`, sound); // Log the attempt and the object
+
+    // Check if the sound object actually exists
+    if (!sound) {
+        console.error(`Sound object for "${soundName}" is missing or failed to load.`);
+        return; // Exit if sound doesn't exist
+    }
+
+    // Browser audio interaction check
+    // Allow feedback sounds immediately after click, or any sound if recent interaction
+    if (Date.now() - lastInteractionTime < 1500 || soundName === 'good_job' || soundName === 'wrong_answer') { // Increased time slightly
+        console.log(`Interaction check passed for ${soundName}. Playing...`);
+        sound.currentTime = 0; // Rewind before playing
+        sound.play().then(() => {
+            // Optional: Log success
+            // console.log(`Playback successful for ${soundName}`);
+        }).catch(e => {
+            // THIS IS IMPORTANT - logs if the browser blocks playback
+            console.error(`Audio play failed for ${soundName}:`, e);
+            // If you see "NotAllowedError", it's the autoplay policy
+        });
+    } else {
+        console.log(`Audio skipped for ${soundName}: No recent user interaction.`);
+    }
+}
+// **** END OF playSound FUNCTION ****
+
 
 // --- Particle Class ---
 class Particle {
@@ -92,12 +119,18 @@ class Particle {
 function resizeCanvas() {
     // Make canvas resolution match its display size
     const containerRect = gameContainer.getBoundingClientRect();
+    // Ensure container has dimensions before proceeding
+    if (containerRect.width === 0 || containerRect.height === 0) return;
+
     canvas.width = containerRect.width;
-    canvas.height = containerRect.height - BUTTON_AREA_HEIGHT; // Adjust for button bar
+     // Estimate button bar height dynamically or use a fixed value assumed by CSS
+    const topBarHeight = document.getElementById('top-bar').offsetHeight || BUTTON_AREA_HEIGHT;
+    canvas.height = containerRect.height - topBarHeight;
+
     canvasWidth = canvas.width;
     canvasHeight = canvas.height;
     console.log(`Canvas resized to: ${canvasWidth}x${canvasHeight}`);
-    // Redraw immediately after resize
+    // Redraw immediately after resize only if game is active
     if(gameState !== 'START_MENU') draw();
 }
 
@@ -118,6 +151,12 @@ function getRandomColor() {
 
 function generateNumbers(targetNum) {
     numbersOnScreen = [];
+    // Ensure canvas dimensions are valid before proceeding
+    if (!canvasWidth || !canvasHeight || canvasHeight <=0) {
+        console.warn("Canvas dimensions not set, cannot generate numbers.");
+        return;
+    }
+
     const existingRects = [];
     const fontSize = getNumberFontSize();
     ctx.font = `bold ${fontSize}px sans-serif`; // Set font to measure text
@@ -138,17 +177,28 @@ function generateNumbers(targetNum) {
         const text = String(num);
         const metrics = ctx.measureText(text);
         const textWidth = metrics.width;
-        const textHeight = fontSize; // Approximate height
+        // Using font bounding box ascent/descent for more accurate height estimate if available
+        const textHeight = metrics.actualBoundingBoxAscent && metrics.actualBoundingBoxDescent ?
+                           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent :
+                           fontSize; // Fallback to fontSize
         const padding = 15; // Padding around numbers for collision and clicking
 
         let attempts = 0;
         let placed = false;
         while (attempts < 100 && !placed) {
-            // Ensure numbers are fully within bounds and below button bar
-            const randX = Math.random() * (canvasWidth - textWidth - padding * 2) + padding + textWidth / 2;
-             // Y position needs to be below button area
-            const randY = Math.random() * (canvasHeight - textHeight - padding*2) + padding + textHeight/2;
+             // Ensure numbers are fully within bounds
+            const minX = padding + textWidth / 2;
+            const maxX = canvasWidth - padding - textWidth / 2;
+            const minY = padding + textHeight / 2; // Y position starts below button area conceptually
+            const maxY = canvasHeight - padding - textHeight / 2;
 
+            if (maxX <= minX || maxY <= minY) {
+                console.warn("Canvas too small to place numbers.");
+                break; // Prevent infinite loop if canvas is too small
+            }
+
+            const randX = Math.random() * (maxX - minX) + minX;
+            const randY = Math.random() * (maxY - minY) + minY;
 
             const numRect = {
                 x: randX - textWidth / 2 - padding, // Top-left x for collision rect
@@ -186,7 +236,7 @@ function generateNumbers(targetNum) {
             }
             attempts++;
         }
-        if (!placed) console.warn(`Could not place number ${num} without overlap.`);
+        if (!placed && maxX > minX && maxY > minY) console.warn(`Could not place number ${num} without overlap.`);
     }
      console.log("Generated numbers:", numbersOnScreen);
 }
@@ -200,27 +250,29 @@ function createParticles(centerX, centerY, color) {
 
 function updateFeedback(message, type) {
     feedbackDiv.textContent = message;
-    feedbackDiv.className = `feedback-${type}`; // Apply CSS class
+    feedbackDiv.className = type ? `feedback-${type}` : ''; // Apply CSS class or remove if no type
+
     clearTimeout(feedbackTimeout); // Clear previous timer if any
 
-    if (type === 'correct' || type === 'wrong') {
+    // Only set a timeout to clear feedback or move on if it's timed feedback
+    if ((type === 'correct' || type === 'wrong') && FEEDBACK_DURATION_MS > 0) {
         feedbackTimeout = setTimeout(() => {
+            // Check the state *when the timeout fires*
             if(gameState === 'CORRECT_FEEDBACK' && type === 'correct') {
-                 // Transition to next number after correct feedback timeout
-                startNewRound();
+                 startNewRound();
             } else if (gameState === 'WRONG_FEEDBACK' && type === 'wrong') {
-                // Go back to playing state after wrong feedback timeout
                  gameState = 'PLAYING';
-                 feedbackDiv.textContent = '';
-                 feedbackDiv.className = '';
-                 // Restart audio cue timer
-                 resetAudioCueTimer();
+                 updateFeedback('', null); // Clear feedback text visually
+                 resetAudioCueTimer(); // Restart cue timer after wrong answer shown
             } else {
-                 // General clear if state changed elsewhere
-                 feedbackDiv.textContent = '';
-                 feedbackDiv.className = '';
+                 // If state changed (e.g., paused, exited) while feedback was showing, just clear visually
+                 updateFeedback('', null);
             }
         }, FEEDBACK_DURATION_MS);
+    } else if (!type) {
+        // If explicitly clearing feedback (type is null/undefined), ensure text is gone
+        feedbackDiv.textContent = '';
+        feedbackDiv.className = '';
     }
 }
 
@@ -229,27 +281,32 @@ function resetAudioCueTimer() {
     clearTimeout(audioCueTimeout);
     if (gameState === 'PLAYING' && targetNumber !== -1) {
         audioCueTimeout = setTimeout(() => {
-            playSound(targetNumber);
-            resetAudioCueTimer(); // Schedule the next one
+            playSound(targetNumber); // Play the cue
+            resetAudioCueTimer(); // Schedule the *next* one
         }, AUDIO_REPEAT_DELAY_MS);
     }
 }
 
 function startNewRound() {
     targetNumber = Math.floor(Math.random() * (MAX_NUMBER - MIN_NUMBER + 1)) + MIN_NUMBER;
-    generateNumbers(targetNumber);
-    particles = [];
+    generateNumbers(targetNumber); // Generate positions for numbers
+    particles = []; // Clear any old particles
     gameState = 'PLAYING';
-    feedbackDiv.textContent = '';
-    feedbackDiv.className = '';
+    updateFeedback('', null); // Clear any previous feedback immediately
     clearTimeout(feedbackTimeout); // Ensure no old feedback timer runs
-    playSound(targetNumber);
-    resetAudioCueTimer();
+
+    // Play the sound *after* a tiny delay to increase chances of interaction check passing
+    setTimeout(() => playSound(targetNumber), 50);
+
+    resetAudioCueTimer(); // Start the timer for the *next* repetition
     console.log(`New round. Target: ${targetNumber}`);
 }
 
 // --- Drawing Functions ---
 function draw() {
+     // Ensure canvas context is available
+    if (!ctx) return;
+
     // Clear canvas
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
@@ -284,6 +341,7 @@ function draw() {
 }
 
 function drawNumbers() {
+     if (!ctx || !canvasWidth) return; // Ensure context and dimensions are ready
      const fontSize = getNumberFontSize();
      ctx.font = `bold ${fontSize}px sans-serif`;
      ctx.textAlign = 'center';
@@ -293,139 +351,167 @@ function drawNumbers() {
         ctx.fillStyle = numInfo.color;
         // Use the center coordinates stored in numInfo
         ctx.fillText(String(numInfo.value), numInfo.x, numInfo.y);
-        // Optional: Draw bounding box for debugging clicks
-        // ctx.strokeStyle = 'red';
-        // ctx.strokeRect(numInfo.rect.x, numInfo.rect.y, numInfo.rect.width, numInfo.rect.height);
      });
 }
 
 // --- Update Functions ---
 function update(dt) {
+    // Only update particles if in the correct state
     if (gameState === 'CORRECT_FEEDBACK') {
-        particles.forEach(p => p.update(dt));
-        // Remove dead particles
-        particles = particles.filter(p => p.alpha > 0);
+        let anyActive = false;
+        particles.forEach(p => {
+            p.update(dt);
+            if (p.alpha > 0) { // Check if particle is still visible
+                anyActive = true;
+            }
+        });
+        // Optimization: filter particles only once per frame if needed, or let them fade out naturally
+        // particles = particles.filter(p => p.alpha > 0);
     }
 }
+
 
 // --- Game Loop ---
 let lastTime = 0;
 function gameLoop(timestamp) {
+    // Ensure timestamp is valid
+    if (!lastTime) lastTime = timestamp;
     const dt = (timestamp - lastTime) / 1000; // Delta time in seconds
     lastTime = timestamp;
 
-    if (gameState !== 'PAUSED') {
+    // Only update game logic if not paused
+    if (gameState !== 'PAUSED' && gameState !== 'START_MENU') {
         update(dt); // Update particle positions etc.
     }
-    draw(); // Draw everything
+    // Always draw the current state
+    draw();
 
     requestAnimationFrame(gameLoop); // Keep the loop going
 }
 
 // --- Event Listeners ---
 function handleInteraction(event) {
-    event.preventDefault(); // Prevent scrolling/zooming on touch
+    event.preventDefault(); // Prevent defaults like scrolling/zooming on touch
 
-    lastInteractionTime = Date.now(); // Record interaction for audio playback
+    // Record interaction time - crucial for audio autoplay policies
+    lastInteractionTime = Date.now();
 
     // Get click/touch coordinates relative to the canvas
     const rect = canvas.getBoundingClientRect();
     let clientX, clientY;
 
+    // Handle both mouse clicks and touch events
     if (event.type === 'touchstart') {
+        if (!event.touches || event.touches.length === 0) return; // No touch data
         clientX = event.touches[0].clientX;
         clientY = event.touches[0].clientY;
-    } else { // 'click'
+    } else { // 'click' or other pointer events
         clientX = event.clientX;
         clientY = event.clientY;
     }
 
+     // Calculate coordinates relative to the canvas element
     const canvasX = clientX - rect.left;
     const canvasY = clientY - rect.top;
 
-    // Only process clicks if playing
+    // Only process clicks/taps if the game is in the playing state
     if (gameState === 'PLAYING') {
         let clickedNumber = false;
-        for (let i = numbersOnScreen.length - 1; i >= 0; i--) { // Loop backwards for safe removal
+        // Iterate backwards through the numbers array allows safe removal using splice
+        for (let i = numbersOnScreen.length - 1; i >= 0; i--) {
             const numInfo = numbersOnScreen[i];
-            // Check if click is within the number's bounding rectangle
+
+            // Simple bounding box check for collision
             if (canvasX >= numInfo.rect.x && canvasX <= numInfo.rect.x + numInfo.rect.width &&
                 canvasY >= numInfo.rect.y && canvasY <= numInfo.rect.y + numInfo.rect.height) {
 
-                clickedNumber = true;
+                clickedNumber = true; // A number was hit
+
                 if (numInfo.value === targetNumber) {
-                    // CORRECT!
+                    // CORRECT Answer!
                     gameState = 'CORRECT_FEEDBACK';
-                    updateFeedback('Good Job!', 'correct');
-                    playSound('good_job');
-                    createParticles(numInfo.x, numInfo.y, numInfo.color);
-                    numbersOnScreen.splice(i, 1); // Remove the number
-                    clearTimeout(audioCueTimeout); // Stop repeating cue
+                    updateFeedback('Good Job!', 'correct'); // Display feedback
+                    playSound('good_job'); // Play success sound
+                    createParticles(numInfo.x, numInfo.y, numInfo.color); // Start particle animation
+                    numbersOnScreen.splice(i, 1); // Remove the correctly clicked number from the screen
+                    clearTimeout(audioCueTimeout); // Stop the repeating audio cue
                 } else {
-                    // WRONG!
+                    // WRONG Answer!
                     gameState = 'WRONG_FEEDBACK';
-                    updateFeedback('Wrong answer, try again', 'wrong');
-                    playSound('wrong_answer');
-                    // Don't reset audio cue timer on wrong answer
+                    updateFeedback('Wrong answer, try again', 'wrong'); // Display feedback
+                    playSound('wrong_answer'); // Play failure sound
+                    // Do not reset audio cue timer - let them hear the target again if needed
                 }
-                break; // Stop checking once a number is hit
+                break; // Exit loop once a number is clicked (correct or wrong)
             }
         }
     }
 }
 
 startButton.addEventListener('click', () => {
-    lastInteractionTime = Date.now();
-    if (gameState === 'START_MENU' || gameState === 'PAUSED') { // Allow restart from pause? Or only start menu?
-        startNewRound();
-        pauseButton.textContent = 'Pause';
+    lastInteractionTime = Date.now(); // Record interaction
+    // Start the game if it's the initial state or potentially if paused (optional restart)
+    if (gameState === 'START_MENU' || gameState === 'PAUSED') {
+        startNewRound(); // Initialize and start the first/next round
+        pauseButton.textContent = 'Pause'; // Ensure pause button text is correct
+        pauseButton.disabled = false; // Enable pause button
     }
 });
 
 pauseButton.addEventListener('click', () => {
-    lastInteractionTime = Date.now();
+    lastInteractionTime = Date.now(); // Record interaction
     if (gameState === 'PLAYING' || gameState === 'WRONG_FEEDBACK') {
-        pausedFromState = gameState;
+        // Pause the game
+        pausedFromState = gameState; // Remember where we paused from
         gameState = 'PAUSED';
-        pauseButton.textContent = 'Resume';
-        clearTimeout(audioCueTimeout); // Stop audio cue timer
-        clearTimeout(feedbackTimeout); // Stop feedback timer
-        // Maybe pause sounds here if using Web Audio API
+        pauseButton.textContent = 'Resume'; // Change button text
+        clearTimeout(audioCueTimeout); // Stop repeating cues
+        clearTimeout(feedbackTimeout); // Stop any active feedback timer
+        updateFeedback('', null); // Clear feedback text visually
+        // Note: <audio> elements don't have a built-in pause-all like pygame.mixer
     } else if (gameState === 'PAUSED') {
-        gameState = pausedFromState;
-        pauseButton.textContent = 'Pause';
-        resetAudioCueTimer(); // Restart audio cue timer
-         // Restore feedback if it was active (might need more state)
+        // Resume the game
+        gameState = pausedFromState; // Restore previous state
+        pauseButton.textContent = 'Pause'; // Change button text back
+        // If resuming into a state that needs timers, reset them
+        if (gameState === 'PLAYING' || gameState === 'WRONG_FEEDBACK') {
+            resetAudioCueTimer();
+        }
+         // Restore feedback visually if it was active (e.g., wrong answer)
         if (pausedFromState === 'WRONG_FEEDBACK') {
              updateFeedback('Wrong answer, try again', 'wrong');
         }
-
     }
 });
 
 exitButton.addEventListener('click', () => {
-    // Simple exit: go back to start menu state
+    // Reset game to initial state
     gameState = 'START_MENU';
     targetNumber = -1;
     numbersOnScreen = [];
     particles = [];
-    feedbackDiv.textContent = '';
-    feedbackDiv.className = '';
+    updateFeedback('', null); // Clear feedback display
     clearTimeout(feedbackTimeout);
     clearTimeout(audioCueTimeout);
     pauseButton.textContent = 'Pause';
-    // Optionally: window.close(); or history.back(); but these have limitations
+    pauseButton.disabled = true; // Disable pause button in start menu
+    draw(); // Redraw to show start menu immediately
 });
 
-// Use 'click' for mouse and 'touchstart' for touch devices
+// Add listeners for both mouse and touch input
 canvas.addEventListener('click', handleInteraction);
 canvas.addEventListener('touchstart', handleInteraction);
 
-// Resize canvas initially and on window resize
+// Handle window resizing
 window.addEventListener('resize', resizeCanvas);
 
 
 // --- Initial Load ---
-resizeCanvas(); // Set initial size
+// Disable pause button initially
+pauseButton.disabled = true;
 loadSounds(); // Load sound file references
-requestAnimationFrame(gameLoop); // Start the game loop
+// Wait a brief moment for layout, then size canvas and start loop
+setTimeout(() => {
+    resizeCanvas(); // Set initial size based on CSS layout
+    requestAnimationFrame(gameLoop); // Start the main game loop
+}, 100); // Delay slightly for initial rendering
