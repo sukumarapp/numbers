@@ -295,7 +295,10 @@ function startNewRound() {
     updateFeedback('', null); // Clear any previous feedback immediately
     clearTimeout(feedbackTimeout); // Ensure no old feedback timer runs
 
-    // Play the sound *after* a tiny delay to increase chances of interaction check passing
+    // **** ADD THIS LINE ****
+    lastInteractionTime = Date.now(); // Update interaction time just before the next cue
+
+    // Play the sound *after* a tiny delay
     setTimeout(() => playSound(targetNumber), 50);
 
     resetAudioCueTimer(); // Start the timer for the *next* repetition
